@@ -8,13 +8,14 @@ module.exports = {
     "standard-with-typescript",
     "prettier",
     "plugin:prettier/recommended",
+    "plugin:@typescript-eslint/recommended",
   ],
   overrides: [],
   parserOptions: {
     ecmaVersion: "latest",
     sourceType: "module",
   },
-  plugins: ["react", "prettier"],
+  plugins: ["react", "prettier", "@typescript-eslint"],
   rules: {
     "react/react-in-jsx-scope": "off",
     "react/no-unknown-property": "off",

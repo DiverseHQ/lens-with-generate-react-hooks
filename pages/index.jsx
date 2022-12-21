@@ -1,17 +1,21 @@
 import { ConnectButton } from "@rainbow-me/rainbowkit";
-import { useAccount, useSigner } from "wagmi";
+import { useAccount, useSigner, useSignTypedData } from "wagmi";
 import useLogin from "../lib/auth/useLogin";
 import { useLensUserContext } from "../context/LensUserContext";
 import { useEffect, useRef, useState } from "react";
 import useDispatcher from "../lib/dispatcher/useDispatcher";
 import {
+  useBroadcastMutation,
   useCreateProfileMutation,
   useCreateSetDefaultProfileTypedDataMutation,
   useHasTxHashBeenIndexedQuery,
   useProfilesQuery,
 } from "../graphql/generated";
-import { BigNumber, utils } from "ethers";
+import { BigNumber, ethers, utils } from "ethers";
 import { useQueryClient } from "@tanstack/react-query";
+import { splitSignature } from "../lib/ethers.service";
+import { LensHubContractAbi, LensHubContractAddress } from "../lib/config";
+import { usePollUntilIndexed } from "../lib/indexer/has-transaction-been-indexed";
 
 export default function Home() {
   const { address } = useAccount();
@@ -21,13 +25,19 @@ export default function Home() {
   const { mutateAsync: createProfile } = useCreateProfileMutation();
   const { mutateAsync: setDefaultProfile } =
     useCreateSetDefaultProfileTypedDataMutation();
+  const { mutateAsync: broadCast } = useBroadcastMutation();
   const { isSignedIn, hasProfile, data: lensProfile } = useLensUserContext();
-  const [createProfileResultData, setCreateProfileResultData] = useState(null);
-  const [pollUntilIndexedResponse, setPollUntilIndexedResponse] =
-    useState(null);
+
   const [profiles, setProfiles] = useState([]);
+  const [typedData, setTypedData] = useState(null);
+  const [dataId, setDataId] = useState(null);
 
   const queryClient = useQueryClient();
+  const { txResponse, handleSetRequest, polling, requestType } =
+    usePollUntilIndexed(queryClient);
+
+  const signTypedDataResult = useSignTypedData(typedData || undefined);
+
   // const {mutateAsync: pollUntilIndexed} = usePollUntilIndexed(createProfileResultData,queryClient)
 
   const profilesQueryResultFromLensApi = useProfilesQuery(
@@ -50,73 +60,18 @@ export default function Home() {
     await dispatcher();
   }
 
-  const lensHasTxBeenIndexedQuery = useHasTxHashBeenIndexedQuery(
-    {
-      request: createProfileResultData,
-    },
-    {
-      enabled: !!createProfileResultData,
-    }
-  );
-  const { data, isLoading } = lensHasTxBeenIndexedQuery;
-
-  async function pollUntilIndexed() {
-    console.log("pollUntilIndexed", data);
-    const response = data?.hasTxHashBeenIndexed;
-    if (response) {
-      if (response.__typename === "TransactionIndexedResult") {
-        console.log("pool until indexed: indexed", response.indexed);
-        console.log(
-          "pool until metadataStatus: metadataStatus",
-          response.metadataStatus
-        );
-
-        console.log("response.metadataStatus", response.metadataStatus);
-        if (response.metadataStatus) {
-          if (response.metadataStatus.status === "SUCCESS") {
-            setPollUntilIndexedResponse(response);
-            return;
-          }
-          if (response.metadataStatus.status === "METADATA_VALIDATION_FAILED") {
-            throw new Error(response.metadataStatus.status);
-          }
-        } else {
-          if (response.indexed) {
-            setPollUntilIndexedResponse(response);
-            return;
-          }
-        }
-        await new Promise((resolve) => setTimeout(resolve, 1500));
-
-        // this will make the query rerun
-        queryClient.invalidateQueries({
-          queryKey: ["hasTxHashBeenIndexed"],
-        });
-      } else {
-        throw new Error(response.reason);
-      }
-    }
-  }
-
-  async function logFinalResultsAfterResponse() {
-    console.log("pollUntilIndexedResponse", pollUntilIndexedResponse);
-    const result = pollUntilIndexedResponse;
-    console.log("result", result);
+  async function logFinalProfileResultsAfterResponse() {
+    const result = txResponse;
 
     const logs = result?.txReceipt?.logs;
-
-    console.log("create profile: logs", logs);
 
     const topicId = utils.id(
       "ProfileCreated(uint256,address,address,string,string,address,bytes,string,uint256)"
     );
-    console.log("topicid we care about", topicId);
 
     const profileCreatedLog = logs?.find((l) => l.topics[0] === topicId);
-    console.log("profile created log", profileCreatedLog);
 
     const profileCreatedEventLog = profileCreatedLog?.topics;
-    console.log("profile created event logs", profileCreatedEventLog);
 
     const profileId = utils.defaultAbiCoder.decode(
       ["uint256"],
@@ -126,11 +81,7 @@ export default function Home() {
     console.log("profile id", BigNumber.from(profileId).toHexString());
   }
 
-  useEffect(() => {
-    console.log("lensProfile", lensProfile);
-  }, [lensProfile]);
-
-  async function handleCreateProfile() {
+  const handleCreateProfile = async () => {
     const handle = inputRef.current.value;
     console.log("handle", handle);
     const createProfileResult = (
@@ -141,7 +92,6 @@ export default function Home() {
       })
     ).createProfile;
 
-    console.log("createProfileResult", createProfileResult);
     if (createProfileResult.__typename === "RelayError") {
       console.error("create profile: failed");
       return;
@@ -149,27 +99,28 @@ export default function Home() {
 
     console.log("create Profile: poll until indexed");
     console.log("createProfileResult ", createProfileResult);
-    setCreateProfileResultData({ txHash: createProfileResult.txHash });
-  }
+    handleSetRequest("createProfile", { txHash: createProfileResult.txHash });
+    // setCreateProfileResultData({ txHash: createProfileResult.txHash });
+  };
+
+  // useEffect(() => {
+  //   if (createProfileResultData && data) {
+  //     pollUntilIndexed();
+  //   }
+  // }, [createProfileResultData, data]);
 
   useEffect(() => {
-    if (createProfileResultData && data) {
-      pollUntilIndexed();
+    if (txResponse && requestType === "createProfile") {
+      logFinalProfileResultsAfterResponse();
     }
-  }, [createProfileResultData, data]);
-
-  useEffect(() => {
-    if (pollUntilIndexedResponse) {
-      logFinalResultsAfterResponse();
+    if (txResponse && requestType === "setDefaultProfile") {
+      console.log("setDefaultProfile");
+      logFinalResultAfterSetDefaultProfileResponse(txResponse);
     }
-  }, [pollUntilIndexedResponse]);
+  }, [txResponse, requestType]);
 
   useEffect(() => {
     if (profilesQueryResultFromLensApi.data) {
-      console.log(
-        "profiles",
-        profilesQueryResultFromLensApi.data.profiles.items
-      );
       setProfiles(profilesQueryResultFromLensApi.data.profiles.items);
     }
   }, [profilesQueryResultFromLensApi]);
@@ -184,7 +135,82 @@ export default function Home() {
     ).createSetDefaultProfileTypedData;
 
     console.log("data", data);
+    const _typedData = {
+      domain: data?.typedData.domain,
+      types: data?.typedData.types,
+      value: data?.typedData.value,
+    };
+    setTypedData(_typedData);
+    setDataId(data?.id);
   };
+
+  // call contract to set default profile
+  const setDefaultProfileWithSig = async () => {
+    if (!signTypedDataResult.data) return;
+    const { v, r, s } = splitSignature(signTypedDataResult.data);
+    console.log("v", v);
+    console.log("r", r);
+    console.log("s", s);
+    const lensHubContract = new ethers.Contract(
+      LensHubContractAddress,
+      LensHubContractAbi,
+      signer
+    );
+    const tx = await await lensHubContract.setDefaultProfileWithSig({
+      profileId: typedData.value.profileId,
+      wallet: typedData.value.wallet,
+      sig: {
+        v,
+        r,
+        s,
+        deadline: typedData.value.deadline,
+      },
+    });
+    console.log("tx", tx);
+    const receipt = await tx.wait();
+    console.log("receipt", receipt);
+  };
+
+  // use broadcast for gasless transactions
+  const setDefaultProfileWithBroadcast = async (signature, id) => {
+    console.log("signature", signature);
+    console.log("id", id);
+    const broadcastResult = (
+      await broadCast({
+        request: {
+          id,
+          signature,
+        },
+      })
+    ).broadcast;
+    console.log("data", broadcastResult);
+    if (!broadcastResult.txHash) {
+      console.log("broadcastResult", broadcastResult);
+      throw new Error("broadcastResult.txHash is undefined");
+    }
+    handleSetRequest("setDefaultProfile", { txHash: broadcastResult.txHash });
+  };
+
+  const logFinalResultAfterSetDefaultProfileResponse = (resp) => {
+    const indexedResult = resp;
+
+    const logs = indexedResult.txReceipt.logs;
+
+    console.log("follow with broadcast: logs", logs);
+  };
+
+  // singTypedData if typedData is set
+  useEffect(() => {
+    if (typedData && signTypedDataResult.signTypedData) {
+      signTypedDataResult.signTypedData();
+    }
+  }, [typedData]);
+
+  useEffect(() => {
+    if (signTypedDataResult?.data && dataId) {
+      setDefaultProfileWithBroadcast(signTypedDataResult?.data, dataId);
+    }
+  }, [signTypedDataResult?.data, dataId]);
 
   return (
     <>
@@ -217,6 +243,17 @@ export default function Home() {
         <div style={{ display: "flex", flexDirection: "column" }}>
           <input ref={inputRef} type="text" style={{ marginTop: "20px" }} />
           <button onClick={handleCreateProfile}>Create Profile</button>
+        </div>
+        <div>
+          {requestType === "createProfile" && polling && (
+            <div>Polling for create profile</div>
+          )}
+        </div>
+
+        <div style={{ marginTop: "20px" }}>
+          {requestType === "setDefaultProfile" && polling && (
+            <div>Polling for set default profile</div>
+          )}
         </div>
 
         <div style={{ marginTop: "50px" }}>

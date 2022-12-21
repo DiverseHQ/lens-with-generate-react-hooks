@@ -1,4 +1,4 @@
-import { useQuery, useMutation, UseQueryOptions, UseMutationOptions } from '@tanstack/react-query';
+import { useMutation, useQuery, UseMutationOptions, UseQueryOptions } from '@tanstack/react-query';
 import { fetchData } from '../auth-fetcher';
 export type Maybe<T> = T | null;
 export type InputMaybe<T> = Maybe<T>;
@@ -3822,6 +3822,13 @@ export type WorldcoinIdentity = {
   isHuman: Scalars['Boolean'];
 };
 
+export type BroadcastMutationVariables = Exact<{
+  request: BroadcastRequest;
+}>;
+
+
+export type BroadcastMutation = { __typename?: 'Mutation', broadcast: { __typename?: 'RelayError', reason: RelayErrorReasons } | { __typename?: 'RelayerResult', txHash: any, txId: any } };
+
 export type ChallengeQueryVariables = Exact<{
   request: ChallengeRequest;
 }>;
@@ -4577,6 +4584,28 @@ export const OrConditionFieldsNoRecursiveFragmentDoc = `
   }
 }
     `;
+export const BroadcastDocument = `
+    mutation Broadcast($request: BroadcastRequest!) {
+  broadcast(request: $request) {
+    ... on RelayerResult {
+      txHash
+      txId
+    }
+    ... on RelayError {
+      reason
+    }
+  }
+}
+    `;
+export const useBroadcastMutation = <
+      TError = unknown,
+      TContext = unknown
+    >(options?: UseMutationOptions<BroadcastMutation, TError, BroadcastMutationVariables, TContext>) =>
+    useMutation<BroadcastMutation, TError, BroadcastMutationVariables, TContext>(
+      ['Broadcast'],
+      (variables?: BroadcastMutationVariables) => fetchData<BroadcastMutation, BroadcastMutationVariables>(BroadcastDocument, variables)(),
+      options
+    );
 export const ChallengeDocument = `
     query Challenge($request: ChallengeRequest!) {
   challenge(request: $request) {

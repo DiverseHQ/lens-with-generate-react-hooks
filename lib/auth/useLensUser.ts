@@ -14,8 +14,6 @@ export default function useLensUser() {
     return user ? JSON.parse(user) : null;
   });
 
-//   const address = useAddress();
-
   const lensProfileQuery = useDefaultProfileQuery(
     {
       request: {
