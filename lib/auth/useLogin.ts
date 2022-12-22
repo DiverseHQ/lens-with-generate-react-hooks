@@ -11,8 +11,8 @@ import { setAccessTokenToStorage } from "./helpers";
  * 3) Store the access token in local storage
  */
 export default function useLogin() {
-    const {address} = useAccount()
-    const {data: signer} = useSigner()
+  const { address } = useAccount();
+  const { data: signer } = useSigner();
   const queryClient = useQueryClient();
 
   const { mutateAsync: getAccessToken } = useGetAccessTokenMutation();
@@ -21,9 +21,9 @@ export default function useLogin() {
       console.error("No address found. Cannot generateChallenge");
       return null;
     }
-    if(!signer) {
-        console.error("No signer found. Cannot sign challenge")
-        return null
+    if (!signer) {
+      console.error("No signer found. Cannot sign challenge");
+      return null;
     }
 
     // Generate a challenge for the user to sign
@@ -33,7 +33,6 @@ export default function useLogin() {
       console.error("Failed to get challenge from Lens");
       return null;
     }
-
 
     // Sign the challenge message
     const signature = await signer?.signMessage(challenge.text);

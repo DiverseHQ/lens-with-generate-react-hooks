@@ -8,7 +8,7 @@ import { useDefaultProfileQuery } from "../../graphql/generated";
  * DON'T USE THIS DIRECTLY! Use useLensUserContext.
  */
 export default function useLensUser() {
-    const {address} = useAccount()
+  const { address } = useAccount();
   const localStorageQuery = useQuery(["lensUser"], () => {
     const user = localStorage.getItem(STORAGE_KEY);
     return user ? JSON.parse(user) : null;
