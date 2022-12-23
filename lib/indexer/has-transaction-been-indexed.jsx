@@ -1,69 +1,69 @@
-import React, { useEffect, useState } from "react";
-import { useHasTxHashBeenIndexedQuery } from "../../graphql/generated";
+import React, { useEffect, useState } from 'react'
+import { useHasTxHashBeenIndexedQuery } from '../../graphql/generated'
 
-let loop = true;
+let loop = true
 
 export function usePollUntilIndexed(queryClient) {
-  const [requestType, setRequestType] = useState(null);
-  const [request, setRequest] = useState(null);
-  const [polling, setPolling] = useState(false);
-  const [txResponse, setTxResponse] = useState(null);
+  const [requestType, setRequestType] = useState(null)
+  const [request, setRequest] = useState(null)
+  const [polling, setPolling] = useState(false)
+  const [txResponse, setTxResponse] = useState(null)
 
   const handleSetRequest = (type, req) => {
-    setRequestType(type);
-    setRequest(req);
-  };
+    setRequestType(type)
+    setRequest(req)
+  }
 
   const lensHasTxBeenIndexedQuery = useHasTxHashBeenIndexedQuery(
     {
-      request,
+      request
     },
     {
-      enabled: !!request,
+      enabled: !!request
     }
-  );
-  const { data } = lensHasTxBeenIndexedQuery;
+  )
+  const { data } = lensHasTxBeenIndexedQuery
 
   async function pollUntilIndexed() {
-    setPolling(true);
+    setPolling(true)
     // eslint-disable-next-line
     while (loop) {
-      console.log("in loop");
+      console.log('in loop')
       queryClient.invalidateQueries({
-        queryKey: ["hasTxHashBeenIndexed"],
-      });
-      await new Promise((resolve) => setTimeout(resolve, 3000));
+        queryKey: ['hasTxHashBeenIndexed']
+      })
+      await new Promise((resolve) => setTimeout(resolve, 3000))
     }
-    setPolling(false);
+    setPolling(false)
   }
 
   useEffect(() => {
     // rerun query when request changes
     if (request) {
       queryClient.invalidateQueries({
-        queryKey: ["hasTxHashBeenIndexed"],
-      });
-      setTxResponse(null);
+        queryKey: ['hasTxHashBeenIndexed']
+      })
+      setTxResponse(null)
     }
-  }, [request]);
+  }, [request])
 
   useEffect(() => {
     if (!polling && !txResponse && request) {
-      console.log("polling started");
-      loop = true;
-      pollUntilIndexed();
+      console.log('polling started')
+      loop = true
+      pollUntilIndexed()
     }
-  }, [request, txResponse]);
+  }, [request, txResponse])
 
   useEffect(() => {
-    console.log("data", data);
+    console.log('data', data)
     if (data?.hasTxHashBeenIndexed?.indexed) {
       if (loop) {
-        loop = false;
+        loop = false
       }
-      setTxResponse(data.hasTxHashBeenIndexed);
+      setTxResponse(data.hasTxHashBeenIndexed)
     }
-  }, [data]);
+  }, [data])
 
-  return { txResponse, handleSetRequest, requestType, polling };
+  return { txResponse, handleSetRequest, requestType, polling }
 }

@@ -52,7 +52,9 @@ export function setAccessTokenToStorage(
 ) {
   const ls = localStorage || window?.localStorage;
 
-  const exp = parseJwt(refreshToken).exp;
+  const exp = parseJwt(accessToken).exp;
+
+  console.log()
 
   if (!ls) {
     console.error(
