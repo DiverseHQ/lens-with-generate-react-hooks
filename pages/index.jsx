@@ -5,17 +5,22 @@ import { useLensUserContext } from '../context/LensUserContext'
 import { useEffect, useRef, useState } from 'react'
 import useDispatcher from '../lib/dispatcher/useDispatcher'
 import {
+  ProxyActionStatusTypes,
   useBroadcastMutation,
   useCreateProfileMutation,
   useCreateSetDefaultProfileTypedDataMutation,
+  useCreateUnfollowTypedDataMutation,
   useHasTxHashBeenIndexedQuery,
-  useProfilesQuery
+  useProfilesQuery,
+  useProxyActionMutation
 } from '../graphql/generated'
 import { BigNumber, ethers, utils } from 'ethers'
 import { useQueryClient } from '@tanstack/react-query'
 import { splitSignature } from '../lib/ethers.service'
 import { LensHubContractAbi, LensHubContractAddress } from '../lib/config'
-import { usePollUntilIndexed } from '../lib/indexer/has-transaction-been-indexed'
+import { proxyActionStatusRequest } from '../lib/indexer/proxy-actino-status'
+import { sleep } from '../lib/helpers'
+import { pollUntilIndexed } from '../lib/indexer/has-transaction-been-indexed'
 
 export default function Home() {
   const { address } = useAccount()
@@ -26,15 +31,14 @@ export default function Home() {
   const { mutateAsync: setDefaultProfile } =
     useCreateSetDefaultProfileTypedDataMutation()
   const { mutateAsync: broadCast } = useBroadcastMutation()
+  const { mutateAsync: proxyAction } = useProxyActionMutation()
+  const { mutateAsync: unFollow } = useCreateUnfollowTypedDataMutation()
+
   const { isSignedIn, hasProfile, data: lensProfile } = useLensUserContext()
 
   const [profiles, setProfiles] = useState([])
   const [typedData, setTypedData] = useState(null)
-  const [dataId, setDataId] = useState(null)
-
-  const queryClient = useQueryClient()
-  const { txResponse, handleSetRequest, polling, requestType } =
-    usePollUntilIndexed(queryClient)
+  const [dataForAfterSig, setDataForAfterSig] = useState(null)
 
   const signTypedDataResult = useSignTypedData(typedData || undefined)
 
@@ -60,9 +64,7 @@ export default function Home() {
     await dispatcher()
   }
 
-  async function logFinalProfileResultsAfterResponse() {
-    const result = txResponse
-
+  async function logFinalProfileResultsAfterResponse(result) {
     const logs = result?.txReceipt?.logs
 
     const topicId = utils.id(
@@ -99,7 +101,14 @@ export default function Home() {
 
     console.log('create Profile: poll until indexed')
     console.log('createProfileResult ', createProfileResult)
-    handleSetRequest('createProfile', { txHash: createProfileResult.txHash })
+    const indexedResult = await pollUntilIndexed({
+      txHash: createProfileResult.txHash
+    })
+    console.log('indexedResult createPost', indexedResult)
+
+    if (indexedResult && type === 'createProfile') {
+      logFinalProfileResultsAfterResponse(indexedResult)
+    }
     // setCreateProfileResultData({ txHash: createProfileResult.txHash });
   }
 
@@ -109,25 +118,29 @@ export default function Home() {
   //   }
   // }, [createProfileResultData, data]);
 
-  useEffect(() => {
-    if (txResponse && requestType === 'createProfile') {
-      logFinalProfileResultsAfterResponse()
-    }
-    if (txResponse && requestType === 'setDefaultProfile') {
-      console.log('setDefaultProfile')
-      logFinalResultAfterSetDefaultProfileResponse(txResponse)
-    }
-  }, [txResponse, requestType])
+  // useEffect(() => {
+  //   if (txResponse && requestType === 'createProfile') {
+  //     logFinalProfileResultsAfterResponse()
+  //   }
+  //   if (txResponse && requestType === 'setDefaultProfile') {
+  //     console.log('setDefaultProfile')
+  //     logFinalResultAfterSetDefaultProfileResponse(txResponse)
+  //   }
+  //   if (txResponse && requestType === 'unFollow') {
+  //     console.log('unFollow success')
+  //     console.log('txResponse', txResponse)
+  //   }
+  // }, [txResponse, requestType])
 
   useEffect(() => {
-    if (profilesQueryResultFromLensApi.data) {
+    if (profilesQueryResultFromLensApi?.data?.profiles?.items) {
       console.log(
         'profiles of ths address',
         profilesQueryResultFromLensApi.data.profiles.items
       )
       setProfiles(profilesQueryResultFromLensApi.data.profiles.items)
     }
-  }, [profilesQueryResultFromLensApi])
+  }, [profilesQueryResultFromLensApi?.data?.profiles?.items])
 
   const handleSetDefaultProfile = async (profileId) => {
     try {
@@ -146,7 +159,7 @@ export default function Home() {
         value: data?.typedData.value
       }
       setTypedData(_typedData)
-      setDataId(data?.id)
+      setDataForAfterSig({ id: data?.id, type: 'setDefaultProfile' })
     } catch (e) {
       console.error(e)
     }
@@ -180,9 +193,14 @@ export default function Home() {
   }
 
   // use broadcast for gasless transactions
-  const setDefaultProfileWithBroadcast = async (signature, id) => {
+  const broadCastSignatureForGaslessTransaction = async (
+    signature,
+    id,
+    type
+  ) => {
     console.log('signature', signature)
     console.log('id', id)
+    console.log('type', type)
     const broadcastResult = (
       await broadCast({
         request: {
@@ -196,7 +214,12 @@ export default function Home() {
       console.log('broadcastResult', broadcastResult)
       throw new Error('broadcastResult.txHash is undefined')
     }
-    handleSetRequest('setDefaultProfile', { txHash: broadcastResult.txHash })
+    console.log('broadcastFunc poll until indexed start')
+    const indexedResult = await pollUntilIndexed({
+      txHash: broadcastResult.txHash
+    })
+    console.log('indexedResult', indexedResult)
+    console.log('broadcastFunc poll until indexed end')
   }
 
   const logFinalResultAfterSetDefaultProfileResponse = (resp) => {
@@ -215,10 +238,74 @@ export default function Home() {
   }, [typedData])
 
   useEffect(() => {
-    if (signTypedDataResult?.data && dataId) {
-      setDefaultProfileWithBroadcast(signTypedDataResult?.data, dataId)
+    if (
+      signTypedDataResult?.data &&
+      dataForAfterSig?.type &&
+      dataForAfterSig?.id
+    ) {
+      broadCastSignatureForGaslessTransaction(
+        signTypedDataResult?.data,
+        dataForAfterSig.id,
+        dataForAfterSig.type
+      )
     }
-  }, [signTypedDataResult?.data, dataId])
+  }, [signTypedDataResult?.data, dataForAfterSig])
+
+  const handleFollowProfile = async (profileId) => {
+    const followProfileResult = (
+      await proxyAction({
+        request: {
+          follow: {
+            freeFollow: {
+              profileId: profileId
+            }
+          }
+        }
+      })
+    ).proxyAction
+    console.log('followProfileResult index start', followProfileResult)
+
+    // waiting untill proxy action is complete
+    while (true) {
+      try {
+        const statusResult = await proxyActionStatusRequest(followProfileResult)
+        console.log('statusResult', statusResult)
+        if (statusResult.status === ProxyActionStatusTypes.Complete) {
+          console.log('proxy action free follow: complete', statusResult)
+          break
+        }
+      } catch (e) {
+        console.error(e)
+        break
+      }
+      await sleep(1000)
+    }
+
+    console.log('followProfileResult index end', followProfileResult)
+  }
+
+  const handleUnfollowProfile = async (profileId) => {
+    const unfollowProfileResult = (
+      await unFollow({
+        request: {
+          profile: profileId
+        }
+      })
+    ).createUnfollowTypedData
+    console.log('unfollowProfileResult', unfollowProfileResult)
+
+    const _typedData = {
+      domain: unfollowProfileResult?.typedData.domain,
+      types: unfollowProfileResult?.typedData.types,
+      value: unfollowProfileResult?.typedData.value
+    }
+
+    setTypedData(_typedData)
+    setDataForAfterSig({
+      id: unfollowProfileResult?.id,
+      type: 'unfollowProfile'
+    })
+  }
 
   return (
     <>
@@ -252,17 +339,6 @@ export default function Home() {
           <input ref={inputRef} type="text" style={{ marginTop: '20px' }} />
           <button onClick={handleCreateProfile}>Create Profile</button>
         </div>
-        <div>
-          {requestType === 'createProfile' && polling && (
-            <div>Polling for create profile</div>
-          )}
-        </div>
-
-        <div style={{ marginTop: '20px' }}>
-          {requestType === 'setDefaultProfile' && polling && (
-            <div>Polling for set default profile</div>
-          )}
-        </div>
 
         <div style={{ marginTop: '50px' }}>
           <div>Profiles of this address</div>
@@ -275,16 +351,37 @@ export default function Home() {
                   Profile IsDefault: {profile.isDefault ? 'True' : 'False'}
                 </div>
                 <div>
-                  Profile CanUseDispatcher:{' '}
-                  {profile.dispatcher?.canUseRelay ? 'True' : 'False'}
+                  isFollowedByMe: {profile.isFollowedByMe ? 'True' : 'False'}
                 </div>
-                <button
-                  onClick={() => {
-                    handleSetDefaultProfile(profile.id)
-                  }}
-                >
-                  Set as Default Profile
-                </button>
+                <div>
+                  isFollowingMe: {profile.isFollowing ? 'True' : 'False'}
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  {profile.isFollowedByMe ? (
+                    <button
+                      onClick={() => {
+                        handleUnfollowProfile(profile.id)
+                      }}
+                    >
+                      UnFollow
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        handleFollowProfile(profile.id)
+                      }}
+                    >
+                      Follow
+                    </button>
+                  )}
+                  <button
+                    onClick={() => {
+                      handleSetDefaultProfile(profile.id)
+                    }}
+                  >
+                    Set as Default Profile
+                  </button>
+                </div>
               </div>
             )
           })}

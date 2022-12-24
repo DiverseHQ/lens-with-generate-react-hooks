@@ -25,7 +25,7 @@
     "**/*.tsx",
     "lib/dispatcher/useDispatcher.js",
     "pages/index.jsx",
-    "lib/indexer/has-transaction-been-indexed.jsx"
+    "lib/indexer/has-transaction-been-indexed-hook.jsx"
 , "pages/profile.jsx"  ],
   "exclude": [
     "node_modules"

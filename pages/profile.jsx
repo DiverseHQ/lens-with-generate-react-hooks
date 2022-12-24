@@ -13,9 +13,11 @@ import { pinJSONToIPFS, uploadIpfsGetPath } from '../utils/utils'
 import { v4 as uuidv4 } from 'uuid'
 import { useSignTypedData } from 'wagmi'
 import { useQueryClient } from '@tanstack/react-query'
-import { usePollUntilIndexed } from '../lib/indexer/has-transaction-been-indexed'
+import { usePollUntilIndexed } from '../lib/indexer/has-transaction-been-indexed-hook'
+import { pollUntilIndexed } from '../lib/indexer/has-transaction-been-indexed'
 
 const profile = () => {
+  const queryClient = useQueryClient()
   const { isSignedIn, hasProfile, data: lensProfile } = useLensUserContext()
 
   const [dataId, setDataId] = useState(null)
@@ -27,10 +29,6 @@ const profile = () => {
   const { mutateAsync: createPostViaSignedTx } =
     useCreatePostTypedDataMutation()
   const { mutateAsync: broadCast } = useBroadcastMutation()
-
-  const queryClient = useQueryClient()
-  const { txResponse, handleSetRequest, polling, requestType } =
-    usePollUntilIndexed(queryClient)
 
   const [publications, setPublications] = useState([])
 
@@ -76,7 +74,7 @@ const profile = () => {
       )
       setPublications(getPublicatiosnQueryResult?.data.publications.items)
     }
-  }, [getPublicatiosnQueryResult?.data])
+  }, [getPublicatiosnQueryResult?.data?.publications?.items])
 
   const post = async (createPostRequest) => {
     if (lensProfile?.defaultProfile?.dispatcher?.canUseRelay) {
@@ -87,7 +85,19 @@ const profile = () => {
         })
       ).createPostViaDispatcher
       console.log(dispatcherResult)
-      handleSetRequest('dispatherResult', { txId: dispatcherResult.txId })
+      console.log('index started ....')
+      const indexResult = await pollUntilIndexed({
+        txId: dispatcherResult.txId
+      })
+      console.log('index result', indexResult)
+      console.log('index ended ....')
+
+      //invalidate query to update feed
+      if (indexResult.indexed === true) {
+        queryClient.invalidateQueries({
+          queryKey: ['publications']
+        })
+      }
     } else {
       //gasless using signed broadcast
       const postTypedResult = (
@@ -129,7 +139,17 @@ const profile = () => {
       })
     ).broadcast
     console.log('broadcastResult', broadcastResult)
-    handleSetRequest('broadcastResult', { txHash: broadcastResult.txHash })
+    console.log('index started ....')
+    const indexResult = await pollUntilIndexed({
+      txHash: broadcastResult.txHash
+    })
+    console.log('index result', indexResult)
+    console.log('index ended ....')
+    if (indexResult.indexed === true) {
+      queryClient.invalidateQueries({
+        queryKey: ['publications']
+      })
+    }
   }
 
   const handleCreatePost = async () => {
@@ -161,14 +181,6 @@ const profile = () => {
     await post(createPostRequest)
   }
 
-  useEffect(() => {
-    if (txResponse && requestType === 'broadcastResult') {
-      console.log('broadcastResult', txResponse)
-    }
-    if (txResponse && requestType === 'dispatherResult') {
-      console.log('dispatherResult', txResponse)
-    }
-  }, [txResponse, requestType])
   return (
     <div>
       <h1>Profile</h1>
