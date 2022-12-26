@@ -106,7 +106,7 @@ export default function Home() {
     })
     console.log('indexedResult createPost', indexedResult)
 
-    if (indexedResult && type === 'createProfile') {
+    if (indexedResult) {
       logFinalProfileResultsAfterResponse(indexedResult)
     }
     // setCreateProfileResultData({ txHash: createProfileResult.txHash });
